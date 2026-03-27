@@ -130,7 +130,11 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               </p>
             </div>
             <div className="max-w-2xl mx-auto">
-              <CompanySettings />
+              <CompanySettings 
+                onBack={handleBack}
+                onNext={handleNext}
+                showNavigation={true}
+              />
             </div>
           </div>
         );

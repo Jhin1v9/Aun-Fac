@@ -8,7 +8,8 @@ import {
   Save, 
   Loader2, 
   Trash2,
-  ArrowLeft
+  ArrowLeft,
+  ArrowRight
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,9 +23,11 @@ import type { Empresa } from '@/types';
 
 interface CompanySettingsProps {
   onBack?: () => void;
+  onNext?: () => void;
+  showNavigation?: boolean;
 }
 
-export function CompanySettings({ onBack }: CompanySettingsProps) {
+export function CompanySettings({ onBack, onNext, showNavigation = false }: CompanySettingsProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -109,6 +112,11 @@ export function CompanySettings({ onBack }: CompanySettingsProps) {
       
       setEmpresa(empresaData);
       toast.success('Configuración guardada correctamente');
+      
+      // Si hay callback onNext, avanzar al siguiente paso
+      if (onNext) {
+        onNext();
+      }
     } catch (error) {
       toast.error('Error al guardar la configuración');
     } finally {
@@ -444,30 +452,51 @@ export function CompanySettings({ onBack }: CompanySettingsProps) {
       </Card>
 
       {/* Botones fijos en el bottom */}
-      <div className="fixed bottom-0 left-0 right-0 bg-background border-t p-4 flex gap-3 safe-area-pb z-50">
-        {onBack && (
-          <Button 
-            type="button" 
-            variant="outline" 
-            className="flex-1 h-12"
-            onClick={onBack}
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Atrás
-          </Button>
-        )}
-        <Button 
-          type="submit" 
-          className="flex-1 h-12" 
-          disabled={isLoading}
-        >
-          {isLoading ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+      <div className="fixed bottom-0 left-0 right-0 bg-background border-t p-4 safe-area-pb z-50">
+        <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
+          {/* Botón Atrás - Izquierda */}
+          {onBack ? (
+            <Button 
+              type="button" 
+              variant="outline" 
+              className="h-12 px-6"
+              onClick={onBack}
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Atrás
+            </Button>
           ) : (
-            <Save className="w-4 h-4 mr-2" />
+            <div className="w-24" /> /* Spacer cuando no hay botón atrás */
           )}
-          Guardar cambios
-        </Button>
+          
+          {/* Botón Guardar - Centro */}
+          <Button 
+            type="submit" 
+            className="h-12 px-8" 
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4 mr-2" />
+            )}
+            Guardar
+          </Button>
+          
+          {/* Botón Siguiente - Derecha */}
+          {showNavigation && onNext ? (
+            <Button 
+              type="button" 
+              className="h-12 px-6"
+              onClick={onNext}
+            >
+              Siguiente
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Button>
+          ) : (
+            <div className="w-24" /> /* Spacer cuando no hay botón siguiente */
+          )}
+        </div>
       </div>
     </form>
   );
