@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Hash, 
   Sparkles, 
@@ -11,30 +12,38 @@ import {
   Plus,
   Trash2,
   Search,
-  Check
+  Check,
+  Building2
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Badge } from '@/components/ui/badge';
-import { cn, formatCurrency, generateId, calcularFechaVencimiento, tasasIVA, tasasIRPF } from '@/lib/utils';
-import { useAppStore } from '@/stores/appStore';
-import { useIsMobile } from '@/hooks/useMediaQuery';
-import { InvoiceStepper } from './InvoiceStepper';
+import { Separator } from '@/components/ui/separator';
+import { toast } from 'sonner';
+import { useAppStore } from '@/store/appStore';
+import { getRubroById } from '@/data/rubros';
+import { cn, formatearFecha, calcularVencimiento, tasasIVA, tasasIRPF } from '@/lib/utils';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import type { Cliente, Servicio, LineaFactura } from '@/types';
 
+interface InvoiceFormProps {
+  onCancel: () => void;
+  onSave: () => void;
+}
+
 const steps = [
-  { id: 1, label: 'Cliente', labelShort: 'Cli' },
-  { id: 2, label: 'Artículos', labelShort: 'Art' },
-  { id: 3, label: 'Revisión', labelShort: 'Rev' }
+  { id: 1, label: 'Cliente', labelShort: 'Cli', icon: User },
+  { id: 2, label: 'Artículos', labelShort: 'Art', icon: Package },
+  { id: 3, label: 'Revisión', labelShort: 'Rev', icon: FileText }
 ];
 
-export function InvoiceForm() {
+export function InvoiceForm({ onCancel, onSave }: InvoiceFormProps) {
   const [currentStep, setCurrentStep] = useState(1);
   const [numeroExiste, setNumeroExiste] = useState(false);
   const [showClienteModal, setShowClienteModal] = useState(false);
@@ -42,7 +51,7 @@ export function InvoiceForm() {
   const [searchCliente, setSearchCliente] = useState('');
   const [searchServicio, setSearchServicio] = useState('');
   
-  const isMobile = useIsMobile();
+  const isMobile = useMediaQuery('(max-width: 640px)');
   
   const { 
     empresa, 
@@ -50,29 +59,25 @@ export function InvoiceForm() {
     servicios, 
     facturaActual, 
     updateFacturaActual,
-    addLineaFactura,
-    removeLineaFactura,
+    addLinea,
+    removeLinea,
     verificarNumeroExiste,
-    getUltimoNumeroFactura,
+    getProximoNumero,
     addFactura,
-    resetFacturaActual
+    resetFacturaActual,
+    generarId,
+    formatearMoneda
   } = useAppStore();
+
+  const rubro = empresa ? getRubroById(empresa.rubroPrincipal) : null;
 
   // Inicializar número de factura sugerido
   useEffect(() => {
     if (!facturaActual.numero && empresa) {
-      generarNumeroSugerido();
+      const sugerido = getProximoNumero();
+      updateFacturaActual({ numero: sugerido });
     }
-  }, []);
-
-  const generarNumeroSugerido = () => {
-    if (!empresa) return;
-    const ano = new Date().getFullYear();
-    const ultimoNumero = getUltimoNumeroFactura();
-    const secuencia = String(ultimoNumero).padStart(5, '0');
-    const numeroSugerido = `${empresa.prefijoFactura}-${ano}-${secuencia}`;
-    updateFacturaActual({ numero: numeroSugerido });
-  };
+  }, [empresa]);
 
   const handleNumeroChange = (valor: string) => {
     updateFacturaActual({ numero: valor.toUpperCase() });
@@ -82,6 +87,12 @@ export function InvoiceForm() {
     } else {
       setNumeroExiste(false);
     }
+  };
+
+  const generarNumeroSugerido = () => {
+    const sugerido = getProximoNumero();
+    updateFacturaActual({ numero: sugerido });
+    setNumeroExiste(false);
   };
 
   const canNavigateTo = (stepId: number) => {
@@ -98,83 +109,95 @@ export function InvoiceForm() {
   };
 
   const handleSelectCliente = (cliente: Cliente) => {
+    const clienteData = { ...cliente };
     updateFacturaActual({ 
       clienteId: cliente.id,
-      fechaVencimiento: calcularFechaVencimiento(
+      cliente: clienteData,
+      fechaVencimiento: calcularVencimiento(
         facturaActual.fechaEmision || new Date().toISOString().split('T')[0],
-        cliente.diasPago
+        30
       )
     });
     setShowClienteModal(false);
   };
 
   const handleAddServicio = (servicio: Servicio) => {
+    const ivaRate = servicio.iva || empresa?.ivaDefault || 21;
+    const irpfRate = servicio.irpf || empresa?.irpfDefault || 0;
+    const base = servicio.precio;
+    const ivaAmount = base * (ivaRate / 100);
+    const irpfAmount = base * (irpfRate / 100);
+    const total = base + ivaAmount - irpfAmount;
+
     const linea: LineaFactura = {
-      id: generateId(),
+      id: generarId(),
       descripcion: servicio.nombre,
       cantidad: 1,
-      precioUnitario: servicio.precioPorDefecto,
-      ivaRate: servicio.ivaRate,
-      ivaAmount: servicio.precioPorDefecto * (servicio.ivaRate / 100),
-      irpfRate: servicio.irpfAplicable ? (empresa?.irpfPorDefecto || 0) : 0,
-      irpfAmount: servicio.irpfAplicable ? (servicio.precioPorDefecto * ((empresa?.irpfPorDefecto || 0) / 100)) : 0,
-      descuentoPercent: 0,
-      totalLinea: servicio.precioPorDefecto,
+      precioUnitario: servicio.precio,
+      iva: ivaRate,
+      irpf: irpfRate,
+      descuento: 0,
+      total,
+      servicioId: servicio.id
     };
-    addLineaFactura(linea);
+    addLinea(linea);
     setShowServicioModal(false);
   };
 
   const handleAddLineaManual = () => {
     const linea: LineaFactura = {
-      id: generateId(),
+      id: generarId(),
       descripcion: '',
       cantidad: 1,
       precioUnitario: 0,
-      ivaRate: empresa?.ivaPorDefecto || 21,
-      ivaAmount: 0,
-      irpfRate: 0,
-      irpfAmount: 0,
-      descuentoPercent: 0,
-      totalLinea: 0,
+      iva: empresa?.ivaDefault || 21,
+      irpf: 0,
+      descuento: 0,
+      total: 0
     };
-    addLineaFactura(linea);
+    addLinea(linea);
   };
 
   const handleUpdateLinea = (index: number, field: keyof LineaFactura, value: any) => {
     const lineas = facturaActual.lineas || [];
     const linea = { ...lineas[index], [field]: value };
     
-    // Recalcular totales
+    // Recalcular total
     const base = linea.precioUnitario * linea.cantidad;
-    const descuento = base * (linea.descuentoPercent / 100);
+    const descuento = base * (linea.descuento / 100);
     const baseConDescuento = base - descuento;
-    
-    linea.ivaAmount = baseConDescuento * (linea.ivaRate / 100);
-    linea.irpfAmount = baseConDescuento * (linea.irpfRate / 100);
-    linea.totalLinea = baseConDescuento + linea.ivaAmount - linea.irpfAmount;
+    const iva = baseConDescuento * (linea.iva / 100);
+    const irpf = baseConDescuento * (linea.irpf / 100);
+    linea.total = baseConDescuento + iva - irpf;
     
     const nuevasLineas = [...lineas];
     nuevasLineas[index] = linea;
     
-    updateFacturaActual({ lineas: nuevasLineas });
-    
-    // Recalcular totales de la factura
+    // Recalcular totales
     const subtotal = nuevasLineas.reduce((sum, l) => sum + (l.precioUnitario * l.cantidad), 0);
     const totalDescuento = nuevasLineas.reduce((sum, l) => {
       const b = l.precioUnitario * l.cantidad;
-      return sum + (b * (l.descuentoPercent / 100));
+      return sum + (b * (l.descuento / 100));
     }, 0);
-    const totalIva = nuevasLineas.reduce((sum, l) => sum + l.ivaAmount, 0);
-    const totalIrpf = nuevasLineas.reduce((sum, l) => sum + l.irpfAmount, 0);
-    const totalAmount = subtotal - totalDescuento + totalIva - totalIrpf;
+    const totalIva = nuevasLineas.reduce((sum, l) => {
+      const b = l.precioUnitario * l.cantidad;
+      const d = b * (l.descuento / 100);
+      return sum + ((b - d) * (l.iva / 100));
+    }, 0);
+    const totalIrpf = nuevasLineas.reduce((sum, l) => {
+      const b = l.precioUnitario * l.cantidad;
+      const d = b * (l.descuento / 100);
+      return sum + ((b - d) * (l.irpf / 100));
+    }, 0);
+    const total = subtotal - totalDescuento + totalIva - totalIrpf;
     
-    updateFacturaActual({
+    updateFacturaActual({ 
+      lineas: nuevasLineas,
       subtotal,
       totalDescuento,
       totalIva,
       totalIrpf,
-      totalAmount
+      total
     });
   };
 
@@ -199,48 +222,66 @@ export function InvoiceForm() {
     if (!facturaActual.numero || !facturaActual.clienteId) return;
     
     const factura = {
-      id: generateId(),
-      ...facturaActual,
+      id: generarId(),
+      numero: facturaActual.numero,
       estado: 'enviada' as const,
+      clienteId: facturaActual.clienteId,
+      cliente: facturaActual.cliente,
+      fechaEmision: facturaActual.fechaEmision || new Date().toISOString().split('T')[0],
+      fechaVencimiento: facturaActual.fechaVencimiento || calcularVencimiento(new Date().toISOString().split('T')[0], 30),
+      lineas: facturaActual.lineas || [],
+      subtotal: facturaActual.subtotal || 0,
+      totalDescuento: facturaActual.totalDescuento || 0,
+      totalIva: facturaActual.totalIva || 0,
+      totalIrpf: facturaActual.totalIrpf || 0,
+      total: facturaActual.total || 0,
+      notas: facturaActual.notas,
+      terminos: facturaActual.terminos,
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
     
-    addFactura(factura as any);
+    addFactura(factura);
     resetFacturaActual();
-    setCurrentStep(1);
+    toast.success('Factura guardada correctamente');
+    onSave();
   };
 
   // Renderizar paso 1: Cliente
   const renderStepCliente = () => (
     <div className="space-y-6">
-      <Card>
+      <Card className="hover:shadow-md transition-shadow">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <User className="w-5 h-5 text-primary" />
-            Seleccionar Cliente
+            Seleccionar {rubro?.terminologia.cliente || 'Cliente'}
           </CardTitle>
           <CardDescription>
-            Elige un cliente existente o crea uno nuevo
+            Elige un {rubro?.terminologia.cliente.toLowerCase() || 'cliente'} existente
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {clienteSeleccionado ? (
-            <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
+            <div className="bg-primary/5 border border-primary/20 rounded-xl p-4">
               <div className="flex items-start justify-between">
-                <div>
-                  <h4 className="font-semibold">{clienteSeleccionado.nombre}</h4>
-                  {clienteSeleccionado.nifCif && (
-                    <p className="text-sm text-muted-foreground">NIF/CIF: {clienteSeleccionado.nifCif}</p>
-                  )}
-                  {clienteSeleccionado.email && (
-                    <p className="text-sm text-muted-foreground">{clienteSeleccionado.email}</p>
-                  )}
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center">
+                    <Building2 className="w-6 h-6 text-primary" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold">{clienteSeleccionado.nombre}</h4>
+                    {clienteSeleccionado.nifCif && (
+                      <p className="text-sm text-muted-foreground">NIF/CIF: {clienteSeleccionado.nifCif}</p>
+                    )}
+                    {clienteSeleccionado.email && (
+                      <p className="text-sm text-muted-foreground">{clienteSeleccionado.email}</p>
+                    )}
+                  </div>
                 </div>
                 <Button 
                   variant="ghost" 
                   size="sm" 
-                  onClick={() => updateFacturaActual({ clienteId: '' })}
+                  onClick={() => updateFacturaActual({ clienteId: '', cliente: undefined })}
                 >
                   Cambiar
                 </Button>
@@ -249,17 +290,17 @@ export function InvoiceForm() {
           ) : (
             <Button 
               variant="outline" 
-              className="w-full h-24 border-dashed"
+              className="w-full h-24 border-dashed border-2 hover:border-primary hover:bg-primary/5 transition-colors"
               onClick={() => setShowClienteModal(true)}
             >
-              <User className="w-5 h-5 mr-2" />
-              Seleccionar cliente
+              <User className="w-6 h-6 mr-2" />
+              Seleccionar {rubro?.terminologia.cliente.toLowerCase() || 'cliente'}
             </Button>
           )}
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="hover:shadow-md transition-shadow">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <FileText className="w-5 h-5 text-primary" />
@@ -298,7 +339,7 @@ export function InvoiceForm() {
         <CardHeader className="pb-3">
           <CardTitle className="text-lg flex items-center gap-2">
             <Hash className="w-5 h-5 text-primary" />
-            Número de Factura
+            Número de {rubro?.terminologia.factura || 'Factura'}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -341,16 +382,16 @@ export function InvoiceForm() {
         </CardContent>
       </Card>
 
-      {/* Servicios del catálogo */}
-      <Card>
+      {/* Servicios */}
+      <Card className="hover:shadow-md transition-shadow">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle className="flex items-center gap-2 text-lg">
               <Package className="w-5 h-5 text-primary" />
-              Artículos
+              {rubro?.terminologia.servicio || 'Artículos'}
             </CardTitle>
             <CardDescription>
-              Añade servicios o productos a la factura
+              Añade {rubro?.terminologia.servicio.toLowerCase() || 'artículos'} a la factura
             </CardDescription>
           </div>
           <div className="flex gap-2">
@@ -375,7 +416,7 @@ export function InvoiceForm() {
           {facturaActual.lineas && facturaActual.lineas.length > 0 ? (
             <div className="space-y-3">
               {facturaActual.lineas.map((linea, index) => (
-                <div key={linea.id} className="bg-muted/50 rounded-lg p-3 space-y-3">
+                <div key={linea.id} className="bg-muted/50 rounded-xl p-4 space-y-3">
                   <div className="grid grid-cols-1 gap-3">
                     <div>
                       <Label className="text-xs">Descripción</Label>
@@ -408,8 +449,8 @@ export function InvoiceForm() {
                       <div>
                         <Label className="text-xs">IVA %</Label>
                         <Select
-                          value={String(linea.ivaRate)}
-                          onValueChange={(v) => handleUpdateLinea(index, 'ivaRate', parseFloat(v))}
+                          value={String(linea.iva)}
+                          onValueChange={(v) => handleUpdateLinea(index, 'iva', parseFloat(v))}
                         >
                           <SelectTrigger>
                             <SelectValue />
@@ -426,8 +467,8 @@ export function InvoiceForm() {
                       <div>
                         <Label className="text-xs">IRPF %</Label>
                         <Select
-                          value={String(linea.irpfRate)}
-                          onValueChange={(v) => handleUpdateLinea(index, 'irpfRate', parseFloat(v))}
+                          value={String(linea.irpf)}
+                          onValueChange={(v) => handleUpdateLinea(index, 'irpf', parseFloat(v))}
                         >
                           <SelectTrigger>
                             <SelectValue />
@@ -448,15 +489,15 @@ export function InvoiceForm() {
                             type="number"
                             min="0"
                             max="100"
-                            value={linea.descuentoPercent}
-                            onChange={(e) => handleUpdateLinea(index, 'descuentoPercent', parseFloat(e.target.value) || 0)}
+                            value={linea.descuento}
+                            onChange={(e) => handleUpdateLinea(index, 'descuento', parseFloat(e.target.value) || 0)}
                           />
                         </div>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-10 w-10 text-red-500"
-                          onClick={() => removeLineaFactura(index)}
+                          className="h-10 w-10 text-red-500 hover:text-red-600 hover:bg-red-50"
+                          onClick={() => removeLinea(index)}
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
@@ -465,15 +506,15 @@ export function InvoiceForm() {
                   </div>
                   <div className="flex justify-end">
                     <span className="text-sm font-semibold">
-                      Total línea: {formatCurrency(linea.totalLinea, empresa?.moneda)}
+                      Total línea: {formatearMoneda(linea.total)}
                     </span>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="text-center py-8 text-muted-foreground">
-              <Package className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <div className="text-center py-12 text-muted-foreground">
+              <Package className="w-12 h-12 mx-auto mb-4 opacity-50" />
               <p>Ningún artículo añadido</p>
               <p className="text-sm">Añade artículos desde el catálogo o manualmente</p>
             </div>
@@ -486,11 +527,11 @@ export function InvoiceForm() {
   // Renderizar paso 3: Revisión
   const renderStepRevision = () => (
     <div className="space-y-6">
-      <Card>
+      <Card className="hover:shadow-md transition-shadow">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <FileText className="w-5 h-5 text-primary" />
-            Revisar Factura
+            Revisar {rubro?.terminologia.factura || 'Factura'}
           </CardTitle>
           <CardDescription>
             Revise los detalles antes de guardar
@@ -498,74 +539,79 @@ export function InvoiceForm() {
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Resumen */}
-          <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+          <div className="bg-muted/50 rounded-xl p-4 space-y-3">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Número:</span>
               <span className="font-mono font-semibold">{facturaActual.numero}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Cliente:</span>
+              <span className="text-muted-foreground">{rubro?.terminologia.cliente || 'Cliente'}:</span>
               <span className="font-semibold">{clienteSeleccionado?.nombre}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Fecha emisión:</span>
-              <span>{facturaActual.fechaEmision}</span>
+              <span>{formatearFecha(facturaActual.fechaEmision || '')}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Fecha vencimiento:</span>
-              <span>{facturaActual.fechaVencimiento}</span>
+              <span>{formatearFecha(facturaActual.fechaVencimiento || '')}</span>
             </div>
           </div>
 
+          <Separator />
+
           {/* Líneas */}
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-xl overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-muted">
                 <tr>
-                  <th className="text-left py-2 px-3">Concepto</th>
-                  <th className="text-center py-2 px-2">Cant.</th>
-                  <th className="text-right py-2 px-2">Precio</th>
-                  <th className="text-right py-2 px-3">Total</th>
+                  <th className="text-left py-3 px-4">Concepto</th>
+                  <th className="text-center py-3 px-2">Cant.</th>
+                  <th className="text-right py-3 px-2">Precio</th>
+                  <th className="text-right py-3 px-4">Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {facturaActual.lineas?.map((linea) => (
                   <tr key={linea.id}>
-                    <td className="py-2 px-3">{linea.descripcion}</td>
-                    <td className="text-center py-2 px-2">{linea.cantidad}</td>
-                    <td className="text-right py-2 px-2">{formatCurrency(linea.precioUnitario, empresa?.moneda)}</td>
-                    <td className="text-right py-2 px-3 font-medium">{formatCurrency(linea.totalLinea, empresa?.moneda)}</td>
+                    <td className="py-3 px-4">{linea.descripcion}</td>
+                    <td className="text-center py-3 px-2">{linea.cantidad}</td>
+                    <td className="text-right py-3 px-2">{formatearMoneda(linea.precioUnitario)}</td>
+                    <td className="text-right py-3 px-4 font-medium">{formatearMoneda(linea.total)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
+          <Separator />
+
           {/* Totales */}
-          <div className="bg-primary/5 rounded-lg p-4 space-y-2">
+          <div className="bg-primary/5 rounded-xl p-4 space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Subtotal:</span>
-              <span>{formatCurrency(facturaActual.subtotal || 0, empresa?.moneda)}</span>
+              <span>{formatearMoneda(facturaActual.subtotal || 0)}</span>
             </div>
             {facturaActual.totalDescuento ? (
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Descuento:</span>
-                <span className="text-red-500">-{formatCurrency(facturaActual.totalDescuento, empresa?.moneda)}</span>
+                <span className="text-red-500">-{formatearMoneda(facturaActual.totalDescuento)}</span>
               </div>
             ) : null}
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">IVA:</span>
-              <span>{formatCurrency(facturaActual.totalIva || 0, empresa?.moneda)}</span>
+              <span>{formatearMoneda(facturaActual.totalIva || 0)}</span>
             </div>
             {facturaActual.totalIrpf ? (
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">IRPF:</span>
-                <span className="text-red-500">-{formatCurrency(facturaActual.totalIrpf, empresa?.moneda)}</span>
+                <span className="text-red-500">-{formatearMoneda(facturaActual.totalIrpf)}</span>
               </div>
             ) : null}
-            <div className="flex justify-between text-lg font-bold pt-2 border-t">
+            <Separator className="my-2" />
+            <div className="flex justify-between text-lg font-bold">
               <span>TOTAL:</span>
-              <span>{formatCurrency(facturaActual.totalAmount || 0, empresa?.moneda)}</span>
+              <span>{formatearMoneda(facturaActual.total || 0)}</span>
             </div>
           </div>
         </CardContent>
@@ -580,19 +626,19 @@ export function InvoiceForm() {
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Buscar cliente..."
+            placeholder={`Buscar ${rubro?.terminologia.cliente.toLowerCase() || 'cliente'}...`}
             value={searchCliente}
             onChange={(e) => setSearchCliente(e.target.value)}
             className="pl-9"
           />
         </div>
-        <ScrollArea className={isMobile ? "h-[60vh]" : "h-[400px]"}>
+        <ScrollArea className={isMobile ? "h-[50vh]" : "h-[400px]"}>
           <div className="space-y-2">
             {filteredClientes.length > 0 ? (
               filteredClientes.map((cliente) => (
                 <button
                   key={cliente.id}
-                  className="w-full text-left p-3 rounded-lg hover:bg-muted transition-colors border"
+                  className="w-full text-left p-4 rounded-xl hover:bg-muted transition-colors border"
                   onClick={() => handleSelectCliente(cliente)}
                 >
                   <div className="font-medium">{cliente.nombre}</div>
@@ -606,7 +652,7 @@ export function InvoiceForm() {
               ))
             ) : (
               <div className="text-center py-8 text-muted-foreground">
-                No se encontraron clientes
+                No se encontraron {rubro?.terminologia.cliente.toLowerCase() || 'cliente'}
               </div>
             )}
           </div>
@@ -617,11 +663,11 @@ export function InvoiceForm() {
     if (isMobile) {
       return (
         <Sheet open={showClienteModal} onOpenChange={setShowClienteModal}>
-          <SheetContent side="bottom" className="h-[90vh] rounded-t-2xl">
+          <SheetContent side="bottom" className="h-[80vh] rounded-t-3xl">
             <SheetHeader>
-              <SheetTitle>Seleccionar Cliente</SheetTitle>
+              <SheetTitle>Seleccionar {rubro?.terminologia.cliente || 'Cliente'}</SheetTitle>
               <SheetDescription>
-                Elige un cliente para la factura
+                Elige un {rubro?.terminologia.cliente.toLowerCase() || 'cliente'} para la factura
               </SheetDescription>
             </SheetHeader>
             <div className="mt-4">{content}</div>
@@ -634,9 +680,9 @@ export function InvoiceForm() {
       <Dialog open={showClienteModal} onOpenChange={setShowClienteModal}>
         <DialogContent className="max-w-2xl max-h-[90vh]">
           <DialogHeader>
-            <DialogTitle>Seleccionar Cliente</DialogTitle>
+            <DialogTitle>Seleccionar {rubro?.terminologia.cliente || 'Cliente'}</DialogTitle>
             <DialogDescription>
-              Elige un cliente para la factura
+              Elige un {rubro?.terminologia.cliente.toLowerCase() || 'cliente'} para la factura
             </DialogDescription>
           </DialogHeader>
           <ScrollArea className="max-h-[calc(90vh-120px)]">
@@ -654,19 +700,19 @@ export function InvoiceForm() {
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Buscar servicio..."
+            placeholder={`Buscar ${rubro?.terminologia.servicio.toLowerCase() || 'servicio'}...`}
             value={searchServicio}
             onChange={(e) => setSearchServicio(e.target.value)}
             className="pl-9"
           />
         </div>
-        <ScrollArea className={isMobile ? "h-[60vh]" : "h-[400px]"}>
+        <ScrollArea className={isMobile ? "h-[50vh]" : "h-[400px]"}>
           <div className="space-y-2">
             {filteredServicios.length > 0 ? (
               filteredServicios.map((servicio) => (
                 <button
                   key={servicio.id}
-                  className="w-full text-left p-3 rounded-lg hover:bg-muted transition-colors border"
+                  className="w-full text-left p-4 rounded-xl hover:bg-muted transition-colors border"
                   onClick={() => handleAddServicio(servicio)}
                 >
                   <div className="flex justify-between items-start">
@@ -677,14 +723,14 @@ export function InvoiceForm() {
                       )}
                     </div>
                     <Badge variant="secondary">
-                      {formatCurrency(servicio.precioPorDefecto, empresa?.moneda)}
+                      {formatearMoneda(servicio.precio)}
                     </Badge>
                   </div>
                 </button>
               ))
             ) : (
               <div className="text-center py-8 text-muted-foreground">
-                No se encontraron servicios
+                No se encontraron {rubro?.terminologia.servicio.toLowerCase() || 'servicio'}
               </div>
             )}
           </div>
@@ -695,11 +741,11 @@ export function InvoiceForm() {
     if (isMobile) {
       return (
         <Sheet open={showServicioModal} onOpenChange={setShowServicioModal}>
-          <SheetContent side="bottom" className="h-[90vh] rounded-t-2xl">
+          <SheetContent side="bottom" className="h-[80vh] rounded-t-3xl">
             <SheetHeader>
               <SheetTitle>Servicios del Catálogo</SheetTitle>
               <SheetDescription>
-                Selecciona un servicio para añadir
+                Selecciona un {rubro?.terminologia.servicio.toLowerCase() || 'servicio'} para añadir
               </SheetDescription>
             </SheetHeader>
             <div className="mt-4">{content}</div>
@@ -714,7 +760,7 @@ export function InvoiceForm() {
           <DialogHeader>
             <DialogTitle>Servicios del Catálogo</DialogTitle>
             <DialogDescription>
-              Selecciona un servicio para añadir
+              Selecciona un {rubro?.terminologia.servicio.toLowerCase() || 'servicio'} para añadir
             </DialogDescription>
           </DialogHeader>
           <ScrollArea className="max-h-[calc(90vh-120px)]">
@@ -727,49 +773,96 @@ export function InvoiceForm() {
 
   return (
     <div className="space-y-6">
-      {/* Stepper */}
-      <InvoiceStepper
-        currentStep={currentStep}
-        steps={steps}
-        onStepClick={handleStepClick}
-        canNavigateTo={canNavigateTo}
-      />
-
-      {/* Contenido del paso */}
-      <div className="pb-24">
-        {currentStep === 1 && renderStepCliente()}
-        {currentStep === 2 && renderStepArticulos()}
-        {currentStep === 3 && renderStepRevision()}
+      {/* Header con stepper */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Nueva {rubro?.terminologia.factura || 'Factura'}</h1>
+          <p className="text-muted-foreground">Paso {currentStep} de {steps.length}</p>
+        </div>
+        <Button variant="outline" onClick={onCancel}>
+          Cancelar
+        </Button>
       </div>
 
-      {/* Botones de navegación fijos */}
-      <div className="fixed bottom-0 left-0 right-0 bg-background border-t p-4 flex gap-3 safe-area-pb z-50">
-        {currentStep > 1 && (
-          <Button 
-            variant="outline" 
-            onClick={() => setCurrentStep(currentStep - 1)}
-            className="flex-1 h-12"
-          >
-            <ArrowLeft className="w-5 h-5 mr-2" />
-            <span className="hidden sm:inline">Atrás</span>
-          </Button>
-        )}
+      {/* Stepper */}
+      <div className="flex items-center justify-center gap-2">
+        {steps.map((step, idx) => {
+          const isActive = currentStep === step.id;
+          const isCompleted = currentStep > step.id;
+          const isClickable = canNavigateTo(step.id);
+          
+          return (
+            <div key={step.id} className="flex items-center">
+              <button
+                type="button"
+                onClick={() => isClickable && handleStepClick(step.id)}
+                disabled={!isClickable}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-full transition-all",
+                  isActive 
+                    ? "bg-primary text-primary-foreground shadow-md" 
+                    : isCompleted
+                      ? "bg-primary/80 text-primary-foreground"
+                      : "bg-muted text-muted-foreground",
+                  !isClickable && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                <span className={cn(
+                  "flex items-center justify-center rounded-full text-xs font-bold w-6 h-6",
+                  isActive || isCompleted ? "bg-white/20" : "bg-muted-foreground/20"
+                )}>
+                  {step.id}
+                </span>
+                <span className="hidden sm:inline text-sm font-medium">{step.label}</span>
+                <span className="sm:hidden text-xs font-medium">{step.labelShort}</span>
+              </button>
+              {idx < steps.length - 1 && (
+                <div className="w-8 h-px bg-border mx-1" />
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Contenido del paso */}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={currentStep}
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -20 }}
+        >
+          {currentStep === 1 && renderStepCliente()}
+          {currentStep === 2 && renderStepArticulos()}
+          {currentStep === 3 && renderStepRevision()}
+        </motion.div>
+      </AnimatePresence>
+
+      {/* Botones de navegación */}
+      <div className="flex items-center justify-between gap-4 pt-4">
+        <Button
+          variant="outline"
+          onClick={currentStep === 1 ? onCancel : () => setCurrentStep(currentStep - 1)}
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          {currentStep === 1 ? 'Cancelar' : 'Atrás'}
+        </Button>
+        
         {currentStep < 3 ? (
-          <Button 
+          <Button
             onClick={() => setCurrentStep(currentStep + 1)}
             disabled={!canProceed()}
-            className="flex-1 h-12"
           >
-            <span className="hidden sm:inline">Siguiente</span>
-            <ArrowRight className="w-5 h-5 sm:ml-2" />
+            Siguiente
+            <ArrowRight className="w-4 h-4 ml-2" />
           </Button>
         ) : (
-          <Button 
+          <Button
             onClick={handleGuardarFactura}
-            className="flex-1 h-12"
+            disabled={!canProceed()}
           >
-            <Check className="w-5 h-5 mr-2" />
-            <span className="hidden sm:inline">Guardar Factura</span>
+            <Check className="w-4 h-4 mr-2" />
+            Guardar {rubro?.terminologia.factura || 'Factura'}
           </Button>
         )}
       </div>

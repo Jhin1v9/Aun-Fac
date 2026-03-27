@@ -1,41 +1,41 @@
 import { useState, useEffect } from 'react';
-import { 
-  ArrowLeft
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
-import { useAppStore } from '@/stores/appStore';
+import { useAppStore } from '@/store/appStore';
 import { Onboarding } from '@/components/Onboarding';
 import { Layout } from '@/components/Layout';
 import { Dashboard } from '@/components/Dashboard';
 import { InvoiceList } from '@/components/InvoiceList';
 import { InvoiceForm } from '@/components/InvoiceForm';
 import { ClientList } from '@/components/ClientList';
-import { CompanySettings } from '@/components/CompanySettings';
+import { ServiceList } from '@/components/ServiceList';
+import { Settings } from '@/components/Settings';
 import { toast } from 'sonner';
 
-type ViewType = 'dashboard' | 'invoices' | 'clients' | 'settings';
-type SubViewType = 'list' | 'form' | 'detail';
+type ViewType = 'dashboard' | 'invoices' | 'clients' | 'services' | 'settings';
 
 function App() {
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
-  const [subView, setSubView] = useState<SubViewType>('list');
+  const [showInvoiceForm, setShowInvoiceForm] = useState(false);
   
   const { 
     onboardingCompletado, 
     setOnboardingCompletado,
     clientes,
     servicios,
-    resetFacturaActual
+    addCliente,
+    addServicio,
+    generarId
   } = useAppStore();
 
   // Datos de ejemplo para demo
   useEffect(() => {
+    if (!onboardingCompletado) return;
+    
     if (clientes.length === 0) {
       // Crear clientes de ejemplo
       const clientesEjemplo = [
         {
-          id: 'cliente-1',
+          id: generarId(),
           nombre: 'Empresa Ejemplo S.L.',
           nifCif: 'B12345678',
           direccion: 'Calle Mayor, 123',
@@ -45,14 +45,13 @@ function App() {
           pais: 'ES',
           telefono: '+34 600 000 001',
           email: 'contacto@ejemplo.com',
-          tipoIva: 'general' as const,
-          metodoPago: 'transferencia' as const,
-          diasPago: 30,
+          totalFacturado: 2500,
+          facturasCount: 3,
           createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         },
         {
-          id: 'cliente-2',
+          id: generarId(),
           nombre: 'Cliente Particular',
           nifCif: '12345678A',
           direccion: 'Avenida Principal, 45',
@@ -62,61 +61,96 @@ function App() {
           pais: 'ES',
           telefono: '+34 600 000 002',
           email: 'cliente@email.com',
-          tipoIva: 'general' as const,
-          metodoPago: 'transferencia' as const,
-          diasPago: 30,
+          totalFacturado: 800,
+          facturasCount: 1,
           createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         },
+        {
+          id: generarId(),
+          nombre: 'Constructora ABC',
+          nifCif: 'B87654321',
+          direccion: 'Polígono Industrial, 12',
+          ciudad: 'Valencia',
+          codigoPostal: '46001',
+          provincia: 'Valencia',
+          pais: 'ES',
+          telefono: '+34 600 000 003',
+          email: 'info@constructoraabc.com',
+          totalFacturado: 15000,
+          facturasCount: 5,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
       ];
       
-      useAppStore.getState().setClientes(clientesEjemplo);
+      clientesEjemplo.forEach(c => addCliente(c));
     }
 
     if (servicios.length === 0) {
       // Crear servicios de ejemplo
       const serviciosEjemplo = [
         {
-          id: 'servicio-1',
+          id: generarId(),
           nombre: 'Consultoría general',
           descripcion: 'Servicio de consultoría empresarial',
-          precioPorDefecto: 100,
-          ivaRate: 21,
-          irpfAplicable: true,
+          precio: 100,
+          iva: 21,
+          irpf: 0,
           categoria: 'Consultoría',
+          duracion: 60,
           usoCount: 5,
+          esPaquete: false,
           createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         },
         {
-          id: 'servicio-2',
+          id: generarId(),
           nombre: 'Desarrollo web',
           descripcion: 'Desarrollo de páginas web',
-          precioPorDefecto: 500,
-          ivaRate: 21,
-          irpfAplicable: true,
+          precio: 500,
+          iva: 21,
+          irpf: 0,
           categoria: 'Desarrollo',
+          duracion: 480,
           usoCount: 3,
+          esPaquete: false,
           createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         },
         {
-          id: 'servicio-3',
+          id: generarId(),
           nombre: 'Diseño gráfico',
-          descripcion: 'Servicios de diseño',
-          precioPorDefecto: 200,
-          ivaRate: 21,
-          irpfAplicable: false,
+          descripcion: 'Servicios de diseño profesional',
+          precio: 200,
+          iva: 21,
+          irpf: 0,
           categoria: 'Diseño',
+          duracion: 120,
           usoCount: 2,
+          esPaquete: false,
           createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         },
+        {
+          id: generarId(),
+          nombre: 'Pack Marketing Digital',
+          descripcion: 'Gestión de redes + SEO + Ads',
+          precio: 800,
+          iva: 21,
+          irpf: 0,
+          categoria: 'Marketing',
+          duracion: 0,
+          usoCount: 1,
+          esPaquete: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
       ];
       
-      useAppStore.getState().setServicios(serviciosEjemplo);
+      serviciosEjemplo.forEach(s => addServicio(s));
     }
-  }, [clientes.length, servicios.length]);
+  }, [onboardingCompletado]);
 
   const handleOnboardingComplete = () => {
     setOnboardingCompletado(true);
@@ -124,7 +158,7 @@ function App() {
   };
 
   const handleLogout = () => {
-    if (confirm('¿Estás seguro de que quieres cerrar sesión?')) {
+    if (confirm('¿Estás seguro de que quieres cerrar sesión? Se perderán los datos no guardados.')) {
       setOnboardingCompletado(false);
       setCurrentView('dashboard');
       toast.info('Sesión cerrada');
@@ -132,24 +166,29 @@ function App() {
   };
 
   const handleNewInvoice = () => {
-    resetFacturaActual();
-    setSubView('form');
+    setShowInvoiceForm(true);
+  };
+
+  const handleCancelInvoice = () => {
+    setShowInvoiceForm(false);
+  };
+
+  const handleSaveInvoice = () => {
+    setShowInvoiceForm(false);
     setCurrentView('invoices');
   };
 
-  const handleViewInvoice = (id: string) => {
-    console.log('Ver factura:', id);
-    // TODO: Implementar vista de detalle
-  };
-
-  const handleBackToList = () => {
-    setSubView('list');
-  };
-
-
-
   // Renderizar contenido según la vista
   const renderContent = () => {
+    if (showInvoiceForm) {
+      return (
+        <InvoiceForm 
+          onCancel={handleCancelInvoice}
+          onSave={handleSaveInvoice}
+        />
+      );
+    }
+
     switch (currentView) {
       case 'dashboard':
         return (
@@ -161,24 +200,10 @@ function App() {
         );
         
       case 'invoices':
-        if (subView === 'form') {
-          return (
-            <div className="space-y-6">
-              <div className="flex items-center gap-2">
-                <Button variant="ghost" size="icon" onClick={handleBackToList}>
-                  <ArrowLeft className="w-5 h-5" />
-                </Button>
-                <h1 className="text-2xl font-bold">Nueva Factura</h1>
-              </div>
-              <InvoiceForm />
-            </div>
-          );
-        }
         return (
           <InvoiceList 
             onBack={() => setCurrentView('dashboard')}
             onNewInvoice={handleNewInvoice}
-            onViewInvoice={handleViewInvoice}
           />
         );
         
@@ -189,17 +214,16 @@ function App() {
           />
         );
         
+      case 'services':
+        return (
+          <ServiceList 
+            onBack={() => setCurrentView('dashboard')}
+          />
+        );
+        
       case 'settings':
         return (
-          <div className="space-y-6">
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon" onClick={() => setCurrentView('dashboard')}>
-                <ArrowLeft className="w-5 h-5" />
-              </Button>
-              <h1 className="text-2xl font-bold">Configuración</h1>
-            </div>
-            <CompanySettings onBack={() => setCurrentView('dashboard')} />
-          </div>
+          <Settings onBack={() => setCurrentView('dashboard')} />
         );
         
       default:
@@ -222,6 +246,7 @@ function App() {
       <Layout 
         currentView={currentView}
         onViewChange={setCurrentView}
+        onNewInvoice={handleNewInvoice}
         onLogout={handleLogout}
       >
         {renderContent()}

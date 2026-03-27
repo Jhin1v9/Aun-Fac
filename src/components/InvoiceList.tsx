@@ -8,7 +8,8 @@ import {
   Download, 
   Trash2,
   Plus,
-  ArrowLeft
+  ArrowLeft,
+  Copy
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,21 +22,25 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useAppStore } from '@/stores/appStore';
-import { formatCurrency, formatDate, estadosFactura } from '@/lib/utils';
+import { useAppStore } from '@/store/appStore';
+import { getRubroById } from '@/data/rubros';
+import { estadosFactura, formatearFecha } from '@/lib/utils';
+import { downloadInvoicePDF } from '@/services/pdfGenerator';
 import type { EstadoFactura } from '@/types';
 
 interface InvoiceListProps {
   onBack: () => void;
   onNewInvoice: () => void;
-  onViewInvoice: (id: string) => void;
+  onViewInvoice?: (id: string) => void;
 }
 
 export function InvoiceList({ onBack, onNewInvoice, onViewInvoice }: InvoiceListProps) {
   const [search, setSearch] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<EstadoFactura | 'todos'>('todos');
   
-  const { facturas, clientes, deleteFactura, empresa } = useAppStore();
+  const { facturas, clientes, deleteFactura, empresa, formatearMoneda } = useAppStore();
+
+  const rubro = empresa ? getRubroById(empresa.rubroPrincipal) : null;
 
   const facturasFiltradas = useMemo(() => {
     return facturas.filter((factura) => {
@@ -49,29 +54,43 @@ export function InvoiceList({ onBack, onNewInvoice, onViewInvoice }: InvoiceList
   }, [facturas, clientes, search, filtroEstado]);
 
   const handleDelete = (id: string) => {
-    if (confirm('¿Estás seguro de que quieres eliminar esta factura?')) {
+    if (confirm(`¿Estás seguro de que quieres eliminar esta ${rubro?.terminologia.factura.toLowerCase() || 'factura'}?`)) {
       deleteFactura(id);
     }
   };
 
+  const handleDuplicar = (_factura: typeof facturas[0]) => {
+    // TODO: Implementar duplicación
+    alert('Función de duplicar en desarrollo');
+  };
+
+  const handleDownloadPDF = (factura: typeof facturas[0]) => {
+    if (!empresa) {
+      alert('Error: No hay configuración de empresa');
+      return;
+    }
+    const cliente = clientes.find(c => c.id === factura.clienteId);
+    downloadInvoicePDF(factura, cliente, empresa);
+  };
+
   return (
-    <div className="space-y-6 pb-24">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="icon" onClick={onBack}>
             <ArrowLeft className="w-5 h-5" />
           </Button>
-          <h1 className="text-2xl font-bold">Facturas</h1>
+          <h1 className="text-2xl font-bold">{rubro?.terminologia.factura || 'Factura'}s</h1>
         </div>
         <Button onClick={onNewInvoice}>
           <Plus className="w-4 h-4 mr-2" />
-          Nueva Factura
+          Nueva {rubro?.terminologia.factura || 'Factura'}
         </Button>
       </div>
 
       {/* Filtros */}
-      <Card>
+      <Card className="hover:shadow-md transition-shadow">
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row gap-3">
             <div className="relative flex-1">
@@ -108,7 +127,7 @@ export function InvoiceList({ onBack, onNewInvoice, onViewInvoice }: InvoiceList
       </Card>
 
       {/* Lista */}
-      <Card>
+      <Card className="hover:shadow-md transition-shadow">
         <CardHeader>
           <CardTitle className="text-lg">
             {facturasFiltradas.length} factura{facturasFiltradas.length !== 1 ? 's' : ''}
@@ -122,31 +141,31 @@ export function InvoiceList({ onBack, onNewInvoice, onViewInvoice }: InvoiceList
                 return (
                   <div 
                     key={factura.id} 
-                    className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
+                    className="flex items-center justify-between p-4 bg-muted/50 rounded-xl hover:bg-muted transition-colors"
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <FileText className="w-5 h-5 text-primary" />
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <FileText className="w-6 h-6 text-primary" />
                       </div>
                       <div className="min-w-0">
-                        <p className="font-medium truncate">{factura.numero}</p>
+                        <p className="font-semibold truncate">{factura.numero}</p>
                         <p className="text-sm text-muted-foreground truncate">
                           {cliente?.nombre || 'Cliente eliminado'}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {formatDate(factura.fechaEmision)}
+                          {formatearFecha(factura.fechaEmision)}
                         </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-right hidden sm:block">
                         <p className="font-semibold">
-                          {formatCurrency(factura.totalAmount, empresa?.moneda)}
+                          {formatearMoneda(factura.total)}
                         </p>
                       </div>
                       <Badge 
                         variant="secondary"
-                        className={estadosFactura[factura.estado].color}
+                        className={`${estadosFactura[factura.estado].bg} ${estadosFactura[factura.estado].textColor}`}
                       >
                         {estadosFactura[factura.estado].label}
                       </Badge>
@@ -157,11 +176,15 @@ export function InvoiceList({ onBack, onNewInvoice, onViewInvoice }: InvoiceList
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => onViewInvoice(factura.id)}>
+                          <DropdownMenuItem onClick={() => onViewInvoice?.(factura.id)}>
                             <Eye className="w-4 h-4 mr-2" />
                             Ver detalles
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleDuplicar(factura)}>
+                            <Copy className="w-4 h-4 mr-2" />
+                            Duplicar
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleDownloadPDF(factura)}>
                             <Download className="w-4 h-4 mr-2" />
                             Descargar PDF
                           </DropdownMenuItem>
@@ -181,7 +204,7 @@ export function InvoiceList({ onBack, onNewInvoice, onViewInvoice }: InvoiceList
             </div>
           ) : (
             <div className="text-center py-12 text-muted-foreground">
-              <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
               <p>No se encontraron facturas</p>
               {(search || filtroEstado !== 'todos') && (
                 <p className="text-sm">Prueba con otros filtros</p>
